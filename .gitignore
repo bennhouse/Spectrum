@@ -1,0 +1,5 @@
+.build/
+build/
+signing/
+vendor/
+.DS_Store
