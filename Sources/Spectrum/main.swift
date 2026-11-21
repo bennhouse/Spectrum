@@ -79,7 +79,7 @@ struct ContentView: View {
             .frame(minWidth: 400, minHeight: 300)
             .background(Color(nsColor: .windowBackgroundColor))
             .navigationTitle(model.fileName ?? "Spectrum")
-            .navigationDocument(URL(fileURLWithPath: model.path ?? "/"))
+            .modifier(DocumentProxy(path: model.path))
             .toolbar {
                 ToolbarItemGroup(placement: .navigation) {
                     Button { Actions.open() } label: { Image(systemName: "folder").toolbarIcon() }
@@ -175,4 +175,12 @@ if CommandLine.arguments.count > 1, CommandLine.arguments[1] == "--render" {
     MainActor.assumeIsolated { CLI.render(Array(CommandLine.arguments.dropFirst(2))) }
 } else {
     SpectrumApp.main()
+}
+
+/// The file's proxy icon in the title bar, only when a file is open.
+struct DocumentProxy: ViewModifier {
+    let path: String?
+    func body(content: Content) -> some View {
+        if let path { content.navigationDocument(URL(fileURLWithPath: path)) } else { content }
+    }
 }

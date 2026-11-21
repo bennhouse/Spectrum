@@ -11,8 +11,8 @@ final class Model: ObservableObject {
     static let minBits = 8, maxBits = 14
     /// Above this many frames (about 24 minutes at 44.1 kHz) a file is analysed a stretch at a time.
     // SPECTRUM_LONG / SPECTRUM_STRETCH (frames) lower them for tests.
-    static let longFrames = ProcessInfo.processInfo.environment["SPECTRUM_LONG"].flatMap { Int($0) } ?? 64_000_000
-    static let stretchFrames = ProcessInfo.processInfo.environment["SPECTRUM_STRETCH"].flatMap { Int($0) } ?? 16_000_000
+    nonisolated static let longFrames = ProcessInfo.processInfo.environment["SPECTRUM_LONG"].flatMap { Int($0) } ?? 64_000_000
+    nonisolated static let stretchFrames = ProcessInfo.processInfo.environment["SPECTRUM_STRETCH"].flatMap { Int($0) } ?? 16_000_000
 
     @Published private(set) var path: String?
     @Published private(set) var desc = ""
