@@ -87,9 +87,12 @@ enum Probe {
     }
 }
 
-/// Decoded samples of one stream: one plane per channel kept in memory.
+/// Decoded samples of one stream: one plane per channel kept in memory. For very long files a
+/// PCM holds only a stretch of the stream: frames [base, base + frames) of `total`.
 final class PCM: @unchecked Sendable {
     let frames: Int
+    let base: Int
+    let total: Int
     let channels: Int
     /// Channels that are decoded and stored (all of them when the file is small enough).
     let kept: [Int]
@@ -100,8 +103,10 @@ final class PCM: @unchecked Sendable {
     private let lock = NSLock()
     var complete = false
 
-    init(frames: Int, channels: Int, kept: [Int], slices: Int) {
+    init(frames: Int, channels: Int, kept: [Int], slices: Int, base: Int = 0, total: Int? = nil) {
         self.frames = frames
+        self.base = base
+        self.total = total ?? frames
         self.channels = channels
         self.kept = kept
         planes = kept.map { _ in
@@ -124,12 +129,15 @@ final class PCM: @unchecked Sendable {
     func setFilled(_ slice: Int, _ n: Int) { lock.lock(); filled[slice] = n; lock.unlock() }
     func markComplete() { lock.lock(); complete = true; lock.unlock() }
 
-    /// True when every sample in [lo, hi) has been decoded.
+    /// True when every sample in [lo, hi) (frames of the whole stream) has been decoded.
     func available(_ lo: Int, _ hi: Int) -> Bool {
         lock.lock(); defer { lock.unlock() }
-        if complete { return true }
-        let lo = max(0, lo), hi = min(frames, hi)
+        // Before the start and past the end is silence; outside this stretch is not here.
+        var lo = max(0, lo), hi = min(total, hi)
         if lo >= hi { return true }
+        if lo < base || hi > base + frames { return false }
+        if complete { return true }
+        lo -= base; hi -= base
         for k in starts.indices {
             let s = starts[k], e = end(of: k)
             if e <= lo || s >= hi { continue }
@@ -160,10 +168,10 @@ final class Decoder: @unchecked Sendable {
                 defer { group.leave() }
                 let start = pcm.starts[slice], end = pcm.end(of: slice)
                 var args = ["-nostdin", "-v", "error", "-threads", "1"]
-                if start > 0 { args += ["-ss", String(format: "%.6f", Double(start) / rate)] }
+                if pcm.base + start > 0 { args += ["-ss", String(format: "%.6f", Double(pcm.base + start) / rate)] }
                 args += ["-i", path, "-map", "0:a:\(stream)", "-vn", "-sn", "-dn"]
                 // Each slice stops a little past its end; the last one reads to the end of the file.
-                if slice + 1 < pcm.starts.count { args += ["-t", String(format: "%.6f", Double(end - start) / rate + 0.05)] }
+                if slice + 1 < pcm.starts.count || pcm.base + pcm.frames < pcm.total { args += ["-t", String(format: "%.6f", Double(end - start) / rate + 0.05)] }
                 args += ["-ar", "\(info.sampleRate)", "-c:a", "pcm_f32le", "-f", "f32le", "pipe:1"]
                 let p = Process()
                 p.executableURL = Tools.ffmpeg
@@ -266,7 +274,7 @@ final class Spectrogram: @unchecked Sendable {
     /// Computes every column not done yet whose samples are available.
     func compute(pcm: PCM, channel: Int, workers maxWorkers: Int = 0, cancelled: () -> Bool) -> Bool {
         guard let plane = pcm.plane(channel: channel) else { return false }
-        let frames = pcm.frames
+        let frames = pcm.total, base = pcm.base
         var todo: [Int] = []
         lock.lock()
         let doneNow = done
@@ -315,7 +323,7 @@ final class Spectrogram: @unchecked Sendable {
                         // Samples before the start or past the end are silence.
                         let from = max(0, s), to = min(frames, p)
                         input.initialize(repeating: 0, count: n)
-                        if to > from { input.advanced(by: from - s).update(from: plane + from, count: to - from) }
+                        if to > from { input.advanced(by: from - s).update(from: plane + (from - base), count: to - from) }
                         vDSP_vmul(input, 1, winp.baseAddress!, 1, input, 1, vDSP_Length(n))
                         var split = DSPSplitComplex(realp: re, imagp: im)
                         input.withMemoryRebound(to: DSPComplex.self, capacity: n / 2) {

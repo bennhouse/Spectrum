@@ -9,6 +9,10 @@ final class Model: ObservableObject {
 
     static let minRange = -140, maxRange = 0
     static let minBits = 8, maxBits = 14
+    /// Above this many frames (about 24 minutes at 44.1 kHz) a file is analysed a stretch at a time.
+    // SPECTRUM_LONG / SPECTRUM_STRETCH (frames) lower them for tests.
+    static let longFrames = ProcessInfo.processInfo.environment["SPECTRUM_LONG"].flatMap { Int($0) } ?? 64_000_000
+    static let stretchFrames = ProcessInfo.processInfo.environment["SPECTRUM_STRETCH"].flatMap { Int($0) } ?? 16_000_000
 
     @Published private(set) var path: String?
     @Published private(set) var desc = ""
@@ -149,62 +153,85 @@ final class Model: ObservableObject {
             guard frames > 0 else { return }
 
             let spec = Spectrogram(columns: columns, bits: bits, window: window)
-            let pcm: PCM
-            var decoder: Decoder?
+            var slices = frames > info.sampleRate * 20 ? min(8, Tools.performanceCores) : 1
+            // Slices decoded at once: one per performance core for anything longer than 20 s.
+            // WMA doesn't seek to the exact sample: decoded in one piece, so columns line up as in Spek.
+            if info.codec.hasPrefix("Windows Media") { slices = 1 }
+            // SPECTRUM_SLICES=n: forces the number of slices (tests compare 1 with the default).
+            if let s = ProcessInfo.processInfo.environment["SPECTRUM_SLICES"].flatMap({ Int($0) }), s > 0 { slices = s }
+
+            /// Decodes `pcm` (unless it is already complete) and computes every column it covers.
+            /// While the decoders run, columns are computed and shown every 150 ms on two cores (more
+            /// would slow the decoders down); everything left is done at once at the end.
+            func process(_ pcm: PCM, decode: Bool) -> Bool {
+                let signal = DispatchSemaphore(value: 0)
+                let finished = Atomic()
+                if decode {
+                    let decoder = Decoder()
+                    job.decoder = decoder
+                    Thread.detachNewThread {
+                        decoder.decode(path: path, stream: stream, info: info, into: pcm) { signal.signal() }
+                        if !decoder.cancelled { pcm.markComplete() }
+                        trace("decoded", started)
+                        finished.set()
+                        signal.signal()
+                    }
+                } else {
+                    finished.set()
+                }
+                var lastPass = Date.distantPast
+                while !job.isCancelled {
+                    let end = finished.value
+                    if !end {
+                        _ = signal.wait(timeout: .now() + .milliseconds(150))
+                        if Date().timeIntervalSince(lastPass) < 0.15 { continue }
+                    }
+                    if job.isCancelled { return false }
+                    lastPass = Date()
+                    let changed = spec.compute(pcm: pcm, channel: channel, workers: end ? 0 : 2) { job.isCancelled }
+                    if changed {
+                        let (p, l, u) = DispatchQueue.main.sync { (self.palette, self.lower, self.upper) }
+                        let img = Painter.image(spec, palette: p, lower: l, upper: u)
+                        DispatchQueue.main.async {
+                            guard self.job === job else { return }
+                            self.spectrogram = spec
+                            self.image = img
+                        }
+                    }
+                    if end && (!changed || spec.finishedCount == columns) { break }
+                }
+                return !job.isCancelled
+            }
+
+            var cachePCM: PCM?
             if let pcm0 {
-                pcm = pcm0
-            } else {
-                // Slices decoded at once: one per performance core for anything longer than 20 s.
-                let slices = frames > info.sampleRate * 20 ? min(8, Tools.performanceCores) : 1
+                guard process(pcm0, decode: false) else { return }
+            } else if frames <= Self.longFrames {
                 // Keep every channel when it fits in about 384 MB, otherwise just this one.
                 let all = frames * info.channels <= 96_000_000
-                pcm = PCM(frames: frames, channels: info.channels, kept: all ? Array(0..<info.channels) : [channel], slices: slices)
-                decoder = Decoder()
-                job.decoder = decoder
-            }
-            let signal = DispatchSemaphore(value: 0)
-            let finished = Atomic()
-            if let decoder {
-                Thread.detachNewThread {
-                    decoder.decode(path: path, stream: stream, info: info, into: pcm) { signal.signal() }
-                    if !decoder.cancelled { pcm.markComplete() }
-                    trace("decoded", started)
-                    finished.set()
-                    signal.signal()
-                }
+                let pcm = PCM(frames: frames, channels: info.channels, kept: all ? Array(0..<info.channels) : [channel], slices: slices)
+                guard process(pcm, decode: true) else { return }
+                if pcm.complete { cachePCM = pcm }
             } else {
-                finished.set()
-            }
-            // While the decoders run, columns are computed and shown every 150 ms on two cores
-            // (more would slow the decoders down); everything left is done at once at the end.
-            var lastPass = Date.distantPast
-            while !job.isCancelled {
-                let end = finished.value
-                if !end {
-                    _ = signal.wait(timeout: .now() + .milliseconds(150))
-                    if Date().timeIntervalSince(lastPass) < 0.15 { continue }
+                // Very long files (Spek streams them): decoded a stretch of columns at a time, about
+                // 16 M samples each (6 minutes at 44.1 kHz), so memory stays small. Not kept.
+                var c0 = 0
+                while c0 < columns {
+                    let lo = max(0, spec.interval(c0, frames: frames).2[0] - spec.nfft)
+                    var c1 = c0 + 1
+                    while c1 < columns, spec.interval(c1, frames: frames).1 - lo <= Self.stretchFrames { c1 += 1 }
+                    let hi = min(frames, spec.interval(c1 - 1, frames: frames).1)
+                    let pcm = PCM(frames: hi - lo, channels: info.channels, kept: [channel], slices: slices, base: lo, total: frames)
+                    guard process(pcm, decode: true) else { return }
+                    c0 = c1
                 }
-                if job.isCancelled { return }
-                lastPass = Date()
-                let changed = spec.compute(pcm: pcm, channel: channel, workers: end ? 0 : 2) { job.isCancelled }
-                let complete = end && spec.finishedCount == columns
-                if changed {
-                    let (p, l, u) = DispatchQueue.main.sync { (self.palette, self.lower, self.upper) }
-                    let img = Painter.image(spec, palette: p, lower: l, upper: u)
-                    DispatchQueue.main.async {
-                        guard self.job === job else { return }
-                        self.spectrogram = spec
-                        self.image = img
-                    }
-                }
-                if complete || (end && !changed) { break }
             }
             if job.isCancelled { return }
             trace("computed", started)
             let elapsed = Date().timeIntervalSince(started)
             DispatchQueue.main.async {
                 guard self.job === job else { return }
-                if pcm.complete { self.cachedPCM = (path, stream, pcm) }
+                if let cachePCM { self.cachedPCM = (path, stream, cachePCM) }
                 self.busy = false
                 self.onFinished?(elapsed)
             }

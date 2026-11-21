@@ -6,7 +6,18 @@ import SwiftUI
 /// dB ruler on the right and the app name in the top right corner. Same measures; drawn with the
 /// system fonts and colours so it follows light and dark mode.
 final class SpectrogramNSView: NSView {
-    static let LPAD: CGFloat = 60, TPAD: CGFloat = 60, RPAD: CGFloat = 90, BPAD: CGFloat = 40
+    static let TPAD: CGFloat = 60, BPAD: CGFloat = 40
+    /// Outer margin, the same on both sides: window edge to the frequency labels on the left,
+    /// dB labels to the window edge on the right (Spek had 60 on the left and 90 on the right).
+    static let MARGIN: CGFloat = 16
+    static let rulerFont = NSFont.monospacedDigitSystemFont(ofSize: 10, weight: .regular)
+    private static func labelWidth(_ s: String) -> CGFloat {
+        ceil((s as NSString).size(withAttributes: [.font: rulerFont]).width)
+    }
+    /// Left: margin, the widest frequency label, the gap to the plot.
+    static let LPAD: CGFloat = MARGIN + labelWidth("00 kHz") + 10
+    /// Right: gap, palette bar, gap, the widest dB label, margin.
+    static let RPAD: CGFloat = 10 + 10 + 10 + labelWidth("-140 dB") + MARGIN
     static let GAP: CGFloat = 10, RULER: CGFloat = 10
 
     var path: String? { didSet { needsDisplay = true } }
@@ -101,7 +112,7 @@ final class SpectrogramNSView: NSView {
 
     private var fonts: (normal: NSFont, large: NSFont, small: NSFont) {
         (.systemFont(ofSize: 12), .systemFont(ofSize: 13, weight: .semibold),
-         .monospacedDigitSystemFont(ofSize: 10, weight: .regular))
+         Self.rulerFont)
     }
 
     override func draw(_ dirtyRect: NSRect) {
@@ -129,7 +140,7 @@ final class SpectrogramNSView: NSView {
         let versionAttrs: [NSAttributedString.Key: Any] = [.font: f.small, .foregroundColor: secondary]
         let blockW = nameW + (version as NSString).size(withAttributes: versionAttrs).width
         // Where Spek puts it, moved left when it would run past the window's edge.
-        let nameX = min(w - RPAD + GAP, w - GAP - blockW)
+        let nameX = min(w - RPAD + GAP, w - Self.MARGIN - blockW)
         name.draw(at: CGPoint(x: nameX, y: nameY), withAttributes: nameAttrs)
         (version as NSString).draw(at: CGPoint(x: nameX + nameW, y: nameY + largeH - smallH - 1), withAttributes: versionAttrs)
 
