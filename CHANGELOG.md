@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- No scroll bars in lists (with "Always show" they took space and changed the lists' width).
+- The file's properties (codec, kbps, Hz, channel, W, F) have room for two lines, kept even when no file is open, so the layout doesn't move and nothing is cut. A line breaks only after a comma, never inside a property.
+
 ## 1.0
 
 First release: Spek 0.8.5 rewritten as a native macOS app.

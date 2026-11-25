@@ -6,7 +6,10 @@ import SwiftUI
 /// dB ruler on the right and the app name in the top right corner. Same measures; drawn with the
 /// system fonts and colours so it follows light and dark mode.
 final class SpectrogramNSView: NSView {
-    static let TPAD: CGFloat = 60, BPAD: CGFloat = 40
+    static let descFont = NSFont.systemFont(ofSize: 12)
+    static let descLineH: CGFloat = ceil(descFont.ascender - descFont.descender)
+    /// Spek's 60, plus one more line: the properties always have room for two lines, file or not.
+    static let TPAD: CGFloat = 60 + descLineH, BPAD: CGFloat = 40
     /// Outer margin, the same on both sides: window edge to the frequency labels on the left,
     /// dB labels to the window edge on the right (Spek had 60 on the left and 90 on the right).
     static let MARGIN: CGFloat = 16
@@ -111,7 +114,7 @@ final class SpectrogramNSView: NSView {
     // MARK: Drawing
 
     private var fonts: (normal: NSFont, large: NSFont, small: NSFont) {
-        (.systemFont(ofSize: 12), .systemFont(ofSize: 13, weight: .semibold),
+        (Self.descFont, .systemFont(ofSize: 13, weight: .semibold),
          Self.rulerFont)
     }
 
@@ -135,7 +138,7 @@ final class SpectrogramNSView: NSView {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0"
         let nameAttrs: [NSAttributedString.Key: Any] = [.font: f.large, .foregroundColor: primary]
         let name = "Spectrum" as NSString
-        let nameY = TPAD - 2 * GAP - normalH - largeH
+        let nameY = TPAD - 2 * GAP - 2 * normalH - largeH
         let nameW = ("Spectrum " as NSString).size(withAttributes: nameAttrs).width
         let versionAttrs: [NSAttributedString.Key: Any] = [.font: f.small, .foregroundColor: secondary]
         let blockW = nameW + (version as NSString).size(withAttributes: versionAttrs).width
@@ -181,9 +184,13 @@ final class SpectrogramNSView: NSView {
         if let path {
             // File name and properties.
             let nameStr = trim(path, font: f.large, width: min(area.width, nameX - GAP - LPAD), end: false)
-            nameStr.draw(at: CGPoint(x: LPAD, y: TPAD - 2 * GAP - normalH - largeH), withAttributes: [.font: f.large, .foregroundColor: primary])
-            let descStr = trim(desc, font: f.normal, width: area.width, end: true)
-            descStr.draw(at: CGPoint(x: LPAD, y: TPAD - GAP - normalH), withAttributes: [.font: f.normal, .foregroundColor: secondary])
+            nameStr.draw(at: CGPoint(x: LPAD, y: nameY), withAttributes: [.font: f.large, .foregroundColor: primary])
+            // Two lines at most, broken only after a comma, so no single property is split.
+            let lines = Self.wrapAtCommas(desc, font: f.normal, width: area.width)
+            for (i, line) in lines.enumerated() {
+                let str = trim(line, font: f.normal, width: area.width, end: true)
+                str.draw(at: CGPoint(x: LPAD, y: TPAD - GAP - CGFloat(2 - i) * normalH), withAttributes: [.font: f.normal, .foregroundColor: secondary])
+            }
         }
 
         let rulerAttrs: [NSAttributedString.Key: Any] = [.font: f.small, .foregroundColor: secondary]
@@ -233,6 +240,19 @@ final class SpectrogramNSView: NSView {
     }
 
     /// Spek's trim(): shortens `s` with "..." so it fits in `width`, keeping the start or the end.
+    /// Splits the properties line after commas: as many whole items on the first line as fit,
+    /// the rest on the second. An item never breaks; one wider than the view is cut with "…".
+    static func wrapAtCommas(_ s: String, font: NSFont, width: CGFloat) -> [String] {
+        let attrs: [NSAttributedString.Key: Any] = [.font: font]
+        func wd(_ t: String) -> CGFloat { (t as NSString).size(withAttributes: attrs).width }
+        if wd(s) <= width { return [s] }
+        let parts = s.components(separatedBy: ", ")
+        var first = parts[0], i = 1
+        while i < parts.count, wd(first + ", " + parts[i] + ",") <= width { first += ", " + parts[i]; i += 1 }
+        if i == parts.count { return [first] }
+        return [first + ",", parts[i...].joined(separator: ", ")]
+    }
+
     private func trim(_ s: String, font: NSFont, width: CGFloat, end: Bool) -> NSString {
         let attrs: [NSAttributedString.Key: Any] = [.font: font]
         func wd(_ t: String) -> CGFloat { (t as NSString).size(withAttributes: attrs).width }

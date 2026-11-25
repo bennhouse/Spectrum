@@ -9,7 +9,7 @@ Spectrum is a native macOS version of [Spek](https://github.com/alexkay/spek) by
 ## How it works
 
 - **Open a file**: drop it on the window or the Dock icon, ⌘O, *Open With › Spectrum* in Finder, or `Spectrum FILE`. One file at a time, as Spek.
-- **The window** is laid out as in Spek: the file path and its properties at the top (stream, codec, bitrate or bit depth, sample rate, channel, FFT window size and function), the spectrogram in the middle with the time ruler below and the frequency ruler on the left, the palette with the dB ruler on the right.
+- **The window** is laid out as in Spek: the file path and its properties at the top (stream, codec, bitrate or bit depth, sample rate, channel, FFT window size and function; two lines, broken only after a comma), the spectrogram in the middle with the time ruler below and the frequency ruler on the left, the palette with the dB ruler on the right.
 - **Save** (⌘S) writes the window as a PNG, named after the file.
 - **Keys**, as in Spek (lowercase forward, uppercase back); they are also in the **Spectrogram** menu:
 

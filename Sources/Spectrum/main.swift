@@ -66,6 +66,7 @@ struct SpectrumApp: App {
 
         Settings {
             SettingsView()
+                .scrollIndicators(.never)
         }
     }
 }
