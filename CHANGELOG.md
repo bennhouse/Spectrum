@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- New icon, redrawn with the rest of the suite from one shared design (same glass parts, light, shadows and safe area on every icon).
 - No scroll bars in lists (with "Always show" they took space and changed the lists' width).
 - The file's properties (codec, kbps, Hz, channel, W, F) have room for two lines, kept even when no file is open, so the layout doesn't move and nothing is cut. A line breaks only after a comma, never inside a property.
 
